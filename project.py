@@ -6,18 +6,21 @@ import subprocess
 import sys
 import csv
 from datetime import datetime
-from mysql.connector import Error
 import os
 import gzip
 import signal
 
 console = Console()
 
+def handle_sigint(signum, frame):
+    print("\nOperation cancelled by user.")
+    sys.exit(0)
+
 def main():
     console.print(Panel("Backup My Database", title="DBackup", border_style="blue"))
     console.print(f"[red][WARNING][/red] YOU need to have the db installed at your system to be able to do the backup!")
     custom_style_fancy = questionary.Style([("highlighted", "bold"),])
-    framework = questionary.select("What's your DB: ", choices=["MySQL", "PostgreSQL", "MongoDB"], pointer="->", show_selected=True, style=custom_style_fancy).ask()
+    framework = questionary.select("What's your DB: ", choices=["MySQL", "PostgreSQL", "MongoDB"], pointer="->", show_selected=True, style=custom_style_fancy).unsafe_ask()
     match framework:
         case "MySQL":
             mysql_backup()
@@ -36,10 +39,10 @@ def credentials():
                 autocompletelist.append(row['user'])
     except FileNotFoundError:
         pass
-    host = questionary.autocomplete("host: ", choices=autocompletelist).ask()
-    user = questionary.autocomplete("user: ", choices=autocompletelist).ask()
-    password = questionary.password("password: ").ask()
-    database = questionary.autocomplete("database name: ", choices=autocompletelist).ask()
+    host = questionary.autocomplete("host: ", choices=autocompletelist).unsafe_ask()
+    user = questionary.autocomplete("user: ", choices=autocompletelist).unsafe_ask()
+    password = questionary.password("password: ").unsafe_ask()
+    database = questionary.autocomplete("database name: ", choices=autocompletelist).unsafe_ask()
     try:
         with open('autocomplete.csv', mode='a', newline='', encoding="utf-8") as csvfile:
             fieldname = ['host', 'user', 'database']
@@ -68,7 +71,7 @@ def mysql_backup():
             if connection.is_connected():
                 console.print(f"[green]CONNECTED[/green] to database {db['database']}")
 
-            start_backup = questionary.confirm("Initiate database backup? ").ask()
+            start_backup = questionary.confirm("Initiate database backup? ").unsafe_ask()
             if start_backup:
                 timestamp = get_timestamp()
                 backup_file = f"{db['database']}_backup_{timestamp}.sql.gz"
@@ -102,9 +105,9 @@ def postgresql_backup():
     import psycopg2
     from psycopg2 import OperationalError
     db = credentials()
-    db['port'] = questionary.select("port: ", choices=["5432", "other"]).ask()
+    db['port'] = questionary.select("port: ", choices=["5432", "other"]).unsafe_ask()
     if db['port'] == "other":
-        db['port'] = questionary.text("port: ").ask()
+        db['port'] = questionary.text("port: ").unsafe_ask()
     connexion = f"host={db['host']} dbname={db['database']} user={db['user']} password={db['password']} port={db['port']}"
     try:
         console.print("Connecting to PostgreSQL database")
@@ -121,7 +124,7 @@ def postgresql_backup():
                         f"-U{db['user']}",
                         f"-d{db['database']}"
                 ]
-                start_backup = questionary.confirm("start postgres backup: ").ask()
+                start_backup = questionary.confirm("start postgres backup: ").unsafe_ask()
                 if start_backup:
                     timestamp = get_timestamp()
                     file = f"{db['database']}_backup_{timestamp}"
@@ -145,15 +148,15 @@ def mongodb_backup():
     from pymongo.errors import ServerSelectionTimeoutError
     file = None
     import re
-    normal_uri = questionary.text("uri: ").ask()
-    password = questionary.password("password: ").ask()
+    normal_uri = questionary.text("uri: ").unsafe_ask()
+    password = questionary.password("password: ").unsafe_ask()
     uri = re.sub(r"<db_password>", password,normal_uri)
-    database = questionary.text("database: ").ask()
+    database = questionary.text("database: ").unsafe_ask()
     try:
         client = MongoClient(uri, serverSelectionTimeoutMS=3000)
         client.server_info()
         console.print(f"[green]CONNECTED[/green] to MongoDB server")
-        start_backup = questionary.confirm("Start backup: ").ask()
+        start_backup = questionary.confirm("Start backup: ").unsafe_ask()
         if start_backup:
             timestamp = get_timestamp()
             file = f"{database}_mongobackup_{timestamp}"
@@ -181,18 +184,22 @@ def mongodb_backup():
 def install_connector(package: str):
     connectors = {"mysql": "mysql-connector-python", "postgresql": "psycopg2-binary", "mongodb": "pymongo"}
     package_exists = importlib.util.find_spec(connectors[package])
-    console.print(f"[orange]VERIFYING[/orange] if connector for {package} exist...")
+    console.print(f"[bright_yellow]VERIFYING[/bright_yellow] if connector for {package} exist...")
     if package_exists == None:
-        console.print(f"Package [bold]{package}[bold] not installed or not found installing now")
+        console.print(f"Package [red][bold]{package}[/bold][/red] not installed or not found installing now")
         result = subprocess.run([sys.executable, "-m", "pip", "install", connectors[package]], capture_output=True, text=True)
         if result.returncode == 0:
-            console.print(f"[green]SUCCESS[/green] Connector for {package} succefully installed")
+            console.print(f"[green]SUCCESS[/green] Connector for [blue1][bold]{package}[/bold][/blue1] succefully installed")
         else:
             console.print(f"[red]FAIL[/red] Fail installing connector for {package}")
             console.print(result.stderr)
             sys.exit(1)
     else:
-        console.print(f"Package {connectors[package]} already installed. Proceding")
+        console.print(f"Package [green][bold]{connectors[package]}[/bold][/green] already installed. Proceding")
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print("Exiting...")
+        sys.exit(1)
